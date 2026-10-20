@@ -1,0 +1,8 @@
+// arithmetic.nv - Constant folding & algebraic simplification demonstration
+kernel compute_constants() {
+    int x = 100;
+    int folded = 10 + 20 * 3;     // Folds to 70 at compile-time
+    int simplified = x * 1 + 0;   // Simplifies to x
+    int result = folded + simplified;
+    return result;
+}

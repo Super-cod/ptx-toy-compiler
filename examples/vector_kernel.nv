@@ -1,0 +1,6 @@
+// vector_kernel.nv - PTX compute kernel with parameters
+kernel saxpy_element(int a, int x, int y) {
+    int ax = a * x;
+    int result = ax + y;
+    return result;
+}
