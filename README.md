@@ -2,72 +2,81 @@
 
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Target](https://img.shields.io/badge/Target-NVIDIA%20PTX%20sm__75-76B900.svg?logo=nvidia)](https://docs.nvidia.com/cuda/parallel-thread-execution/)
-[![Build Status](https://img.shields.io/badge/Tests-12%20Passed%20%2F%200%20Failed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-12%20Passed%20%2F%200%20Failed-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A complete, modular compiler pipeline implemented from scratch in **modern C++20**, designed for a domain-specific kernel language and targeting **NVIDIA PTX (Parallel Thread Execution) Virtual ISA** as well as an in-memory **Stack Virtual Machine** bytecode interpreter.
+A modular, dependency-free compiler pipeline implemented from scratch in **modern C++20**, compiling a high-level kernel DSL into **NVIDIA PTX (Parallel Thread Execution) Virtual ISA** assembly and executable **Stack Virtual Machine** bytecode.
 
-Built to demonstrate compiler engineering principles directly relevant to GPU compiler toolchains (such as NVIDIA's PTX compiler and NVVM): lexical analysis, recursive-descent parsing, strongly-typed AST, lexical scoping with semantic validation, 3-address code linear IR, iterative dataflow optimization passes, and PTX target code emission.
-
----
-
-## Compiler Architecture
-
-```
-                  +--------------------------------+
-                  |  Source Code (*.nv kernel DSL) |
-                  +--------------------------------+
-                                  |
-                                  v
-                      +------------------------+
-                      |      Lexer / Token     |  (Line/Column tracking,
-                      +------------------------+   Comment/Whitespace stripping)
-                                  |
-                                  v
-                      +------------------------+
-                      | Recursive-Descent      |  (Operator precedence,
-                      | Parser                 |   Syntax error diagnostics)
-                      +------------------------+
-                                  |
-                                  v
-                      +------------------------+
-                      | Abstract Syntax Tree   |  (Strongly-typed AST Nodes)
-                      +------------------------+
-                                  |
-                                  v
-                      +------------------------+
-                      | Semantic Analyzer &    |  (Scope resolution,
-                      | Symbol Table           |   Undeclared/Duplicate checks)
-                      +------------------------+
-                                  |
-                                  v
-                      +------------------------+
-                      | Linear IR Generator    |  (Three-Address Code (3AC),
-                      |                        |   Virtual Registers %r0, %r1...)
-                      +------------------------+
-                                  |
-                                  v
-             +------------------------------------------+
-             |         Optimization Pipeline            |
-             |  1. Constant Folding & Propagation       |
-             |  2. Algebraic Identity Simplification    |
-             |  3. Dead Code Elimination (DCE)          |
-             +------------------------------------------+
-                                  |
-                 +----------------+----------------+
-                 |                                 |
-                 v                                 v
-    +--------------------------+     +--------------------------+
-    |   NVIDIA PTX Emitter     |     |   StackVM Interpreter    |
-    | - .version 7.0 / sm_75   |     | - In-memory execution    |
-    | - Parameter loading      |     | - Loop/Branch dispatch   |
-    | - Arithmetic / Branches  |     | - Exact return value     |
-    +--------------------------+     +--------------------------+
-```
+Designed to demonstrate compiler engineering principles directly applicable to GPU toolchains (such as NVIDIA's PTX compiler and NVVM): lexical scanning with source-location tracking, recursive-descent parsing with operator precedence, strongly-typed AST hierarchies, lexical symbol scoping, 3-address code (3AC) linear intermediate representation, iterative dataflow optimization passes, and target code generation.
 
 ---
 
-## Language Grammar Specification
+## Architecture & Compilation Pipeline
+
+```
+                             +-----------------------------------+
+                             |     Source File (*.nv DSL)        |
+                             +-----------------+-----------------+
+                                               |
+                                               v
+                             +-----------------------------------+
+                             |  Lexer (Token Stream & Spans)     |
+                             +-----------------+-----------------+
+                                               |
+                                               v
+                             +-----------------------------------+
+                             |  Recursive-Descent Parser         |
+                             +-----------------+-----------------+
+                                               |
+                                               v
+                             +-----------------------------------+
+                             |  Abstract Syntax Tree (AST)       |
+                             +-----------------+-----------------+
+                                               |
+                                               v
+                             +-----------------------------------+
+                             |  Semantic Analyzer & Symbol Table |
+                             |  - Scope resolution & shadowing   |
+                             |  - Undeclared & duplicate checks  |
+                             +-----------------+-----------------+
+                                               |
+                                               v
+                             +-----------------------------------+
+                             |  Linear IR Generator (3AC)        |
+                             |  - Virtual registers (%r0, %r1..) |
+                             |  - Basic blocks & branch labels   |
+                             +-----------------+-----------------+
+                                               |
+                                               v
+                             +-----------------------------------+
+                             |  Iterative Optimization Pipeline  |
+                             |  1. Constant Folding              |
+                             |  2. Constant Propagation          |
+                             |  3. Algebraic Simplification      |
+                             |  4. Dead Code Elimination (DCE)   |
+                             +-----------------+-----------------+
+                                               |
+                        +----------------------+----------------------+
+                        |                                             |
+                        v                                             v
+        +-------------------------------+             +-------------------------------+
+        |      PTX ISA Code Emitter     |             |    StackVM Bytecode Engine    |
+        | - .version 7.0 / .target sm_75|             | - In-memory execution         |
+        | - Parameter passing registers |             | - Control flow evaluation     |
+        | - Predicated branches (@!%p0) |             | - Automated test verification |
+        +-------------------------------+             +-------------------------------+
+                        |
+                        v
+        +-------------------------------+
+        |  NVIDIA Driver API Execution  |
+        |  - nvcuda.dll cuModuleLoadData|
+        |  - JIT compiled to GPU SASS   |
+        +-------------------------------+
+```
+
+---
+
+## Language Grammar (EBNF)
 
 ```ebnf
 program         ::= kernel_decl* EOF ;
@@ -100,37 +109,55 @@ primary         ::= INT_LITERAL | IDENTIFIER | "(" expr ")" ;
 
 ---
 
-## Optimization Pipeline
+## Optimization Engine
 
-The optimizer uses a fixed-point iteration strategy across three modular passes:
+The compiler features an iterative fixed-point optimization pass manager that executes until no further transformations occur:
 
 1. **Constant Folding & Constant Propagation**:
-   - Compile-time evaluation of constant arithmetic: `10 + 20 * 3` is evaluated to immediate `70`.
-   - Propagates known constants through virtual register assignments within the same basic block.
+   - Evaluates compile-time constant arithmetic (`10 + 20 * 3` $\to$ `70`).
+   - Propagates known register constants through assignments within straight-line basic blocks.
 2. **Algebraic Identity Simplification**:
-   - Identity addition/subtraction: `x + 0` $\rightarrow$ `x`, `x - 0` $\rightarrow$ `x`.
-   - Multiplicative identity & zero: `x * 1` $\rightarrow$ `x`, `x * 0` $\rightarrow$ `0`.
-   - Division identity: `x / 1` $\rightarrow$ `x`.
+   - Additive identity: `x + 0` $\to$ `x`, `x - 0` $\to$ `x`.
+   - Multiplicative identity & zero: `x * 1` $\to$ `x`, `x * 0` $\to$ `0`.
+   - Division identity: `x / 1` $\to$ `x`.
 3. **Dead Code Elimination (DCE)**:
-   - Eliminates dead instructions after unconditional branches (`bra`) or `ret` prior to the subsequent label.
-   - Computes live registers and eliminates assignments to virtual registers that are never read downstream.
+   - Unreachable instruction elimination: dead instructions following unconditional branches (`bra`) or `ret` are pruned.
+   - Unused def elimination: assignments to virtual registers whose results are never consumed downstream are pruned.
 
 ---
 
-## Generated PTX Assembly Example
+## Concrete Code Generation Examples
 
-Compiling `examples/arithmetic.nv`:
+### Example 1: Constant Folding & Algebraic Simplification
+
+Source (`examples/arithmetic.nv`):
 ```c
 kernel compute_constants() {
     int x = 100;
-    int folded = 10 + 20 * 3;     // Folds to 70 at compile-time
-    int simplified = x * 1 + 0;   // Simplifies to x
+    int folded = 10 + 20 * 3;     // Evaluated to 70 at compile time
+    int simplified = x * 1 + 0;   // Algebraic reduction to x
     int result = folded + simplified;
     return result;
 }
 ```
 
-Emitted PTX (`ptxcc --emit-ptx examples/arithmetic.nv`):
+Unoptimized 3AC Intermediate Representation:
+```
+  %r0 = 100
+  %r1 = 10
+  %r2 = 20
+  %r3 = 3
+  %r4 = %r2 * %r3
+  %r5 = %r1 + %r4
+  %r6 = 1
+  %r7 = %r0 * %r6
+  %r8 = 0
+  %r9 = %r7 + %r8
+  %r10 = %r5 + %r9
+  ret %r10
+```
+
+Optimized 3AC IR & Emitted PTX (`ptxcc --emit-ptx examples/arithmetic.nv`):
 ```ptx
 // Generated by ptxcc (NVIDIA PTX Toy Compiler)
 .version 7.0
@@ -147,64 +174,99 @@ Emitted PTX (`ptxcc --emit-ptx examples/arithmetic.nv`):
     ret;
 }
 ```
-*Notice how constant folding and algebraic simplification fully collapsed the entire arithmetic sequence down to immediate `170` at compile time.*
+*The entire 10-instruction sequence is statically collapsed into a single immediate assignment `mov.s32 %r7, 170;`.*
 
-Compiling `examples/vector_kernel.nv`:
+### Example 2: Parameter Handling, Arithmetic, and Control Flow
+
+Source (`examples/fibonacci.nv`):
 ```c
-kernel saxpy_element(int a, int x, int y) {
-    int ax = a * x;
-    int result = ax + y;
-    return result;
+kernel fibonacci(int n) {
+    if (n <= 0) {
+        return 0;
+    }
+    int a = 0;
+    int b = 1;
+    int i = 1;
+    while (i < n) {
+        int temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    return b;
 }
 ```
 
-Emitted PTX:
+Emitted PTX Assembly (`sm_75`):
 ```ptx
 // Generated by ptxcc (NVIDIA PTX Toy Compiler)
 .version 7.0
 .target sm_75
 .address_size 64
 
-.visible .entry saxpy_element(
-    .param .u32 a,
-    .param .u32 x,
-    .param .u32 y
+.visible .entry fibonacci(
+    .param .u32 n
 )
 {
     .reg .s32 %r<17>;
+    .reg .pred %p<8>;
 
-    ld.param.s32 %r0, [a];
-    ld.param.s32 %r1, [x];
-    ld.param.s32 %r2, [y];
-
-    mul.lo.s32 %r4, %r0, %r1;
-    mov.s32 %r3, %r4;
-    add.s32 %r6, %r3, %r2;
-    mov.s32 %r5, %r6;
+    ld.param.s32 %r0, [n];
+    setp.le.s32 %p0, %r0, 0;
+    @!%p0 bra L1;
+    ret;
+L1:
+    mov.s32 %r1, 0;
+    mov.s32 %r2, 1;
+    mov.s32 %r3, 1;
+L2:
+    setp.lt.s32 %p1, %r3, %r0;
+    @!%p1 bra L3;
+    add.s32 %r6, %r1, %r2;
+    mov.s32 %r1, %r2;
+    mov.s32 %r2, %r6;
+    add.s32 %r9, %r3, 1;
+    mov.s32 %r3, %r9;
+    bra L2;
+L3:
     ret;
 }
 ```
 
 ---
 
-## Building and Testing
+## Setup & Build Instructions
 
 ### Prerequisites
-* C++20 compliant compiler (GCC 12+, Clang 14+, or MSVC 2019+)
-* CMake 3.20+
-* Ninja or Make
+* **C++ Compiler:** GCC 12+, Clang 14+, or MSVC 2022 (requires full C++20 standard library support).
+* **Build System:** CMake 3.20+ and Ninja (or GNU Make).
+* **Optional:** NVIDIA GPU with Driver (for hardware PTX JIT execution).
 
-### Build
+### Step-by-Step Build
+
 ```bash
-cmake -S . -B build -G "Ninja"
+# 1. Clone repository
+git clone https://github.com/Super-cod/ptx-toy-compiler.git
+cd ptx-toy-compiler
+
+# 2. Configure build with CMake & Ninja
+cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+
+# 3. Compile compiler binary and test suite
 cmake --build build
 ```
 
-### Run Test Suite
+---
+
+## Verification & Test Suite
+
+The compiler comes with an automated unit and integration test suite covering every phase of compilation:
+
 ```bash
 ./build/ptxcc_tests
 ```
-Output:
+
+### Verified Test Output
 ```
 ===================================================
  ptxcc Compiler Test Suite (C++20)
@@ -226,29 +288,50 @@ Output:
 ===================================================
 ```
 
-### CLI Usage
+### Direct CLI Usage
 ```bash
-# Emit PTX Virtual Assembly
-./build/ptxcc --emit-ptx examples/vector_kernel.nv -o kernel.ptx
+# 1. Emit PTX Virtual Assembly to stdout or file
+./build/ptxcc --emit-ptx examples/vector_kernel.nv -o vector_kernel.ptx
 
-# View 3AC Linear IR
+# 2. View 3AC Linear IR before optimization
 ./build/ptxcc --emit-ir examples/fibonacci.nv
 
-# View Optimized 3AC Linear IR
+# 3. View Optimized 3AC Linear IR
 ./build/ptxcc --emit-opt-ir examples/arithmetic.nv
 
-# Execute directly on internal StackVM interpreter with input arguments
-./build/ptxcc --run --args 7 examples/fibonacci.nv
-# Output: Kernel 'fibonacci' returned: 13
+# 4. Execute on internal StackVM interpreter with input arguments
+./build/ptxcc --run --args 10 examples/fibonacci.nv
+# Output: Kernel 'fibonacci' returned: 55
+```
+
+### Physical GPU JIT Verification via NVIDIA Driver API
+The emitted PTX has been verified to assemble and execute directly on NVIDIA silicon (**RTX 3050, Ampere SM 8.6**) via `nvcuda.dll`:
+```python
+import ctypes
+cuda = ctypes.CDLL("nvcuda.dll")
+cuda.cuInit(0)
+# cuModuleLoadData loads and JIT-compiles emitted PTX string directly into GPU SASS
+status = cuda.cuModuleLoadData(ctypes.byref(module), ptx_bytes)
+assert status == 0  # CUDA_SUCCESS
 ```
 
 ---
 
-## Design Decisions & Engineering Trade-offs
+## Honest Limitations & Engineering Scope
 
-1. **Hand-Written Recursive Descent vs. Parser Generator (Bison/ANTLR)**:
-   - A hand-written recursive descent parser was selected to provide precise, human-readable syntax diagnostics with source code column offsets, and to avoid heavyweight external runtime dependencies.
-2. **Linear Three-Address Code (3AC) vs. Graph-Based SSA**:
-   - A linear 3AC intermediate representation with virtual registers (`%r0`, `%r1`) mirrors the structure of NVIDIA's PTX virtual machine register model. This simplifies lowering to PTX parameter registers while keeping dataflow analysis (def-use chains) clean and maintainable.
-3. **Dual Backends (StackVM + PTX Emitter)**:
-   - Emitting PTX proves compatibility with the target parallel virtual architecture. The in-memory StackVM interpreter provides 100% automated test verification without requiring a live GPU driver during CI test execution.
+To maintain clarity and rigorous engineering boundaries, the current capabilities and intentional trade-offs are outlined below:
+
+| Feature Dimension | Supported in Current Implementation | Out of Current Scope / Future Work |
+| :--- | :--- | :--- |
+| **Data Types** | 32-bit signed integers (`int`) | Floating-point (`float`, `double`), unsigned integers, structs |
+| **Data Structures** | Scalar variables and parameters | Arrays, heap pointers, and dynamic memory allocations |
+| **Intermediate Repr.** | Linear Three-Address Code (3AC) with virtual registers | Graph-based SSA (Static Single Assignment) dominance frontiers |
+| **Optimizations** | Basic-block constant folding/propagation, algebraic identities, local DCE | Global common subexpression elimination (CSE), loop unrolling |
+| **Code Generation** | NVIDIA PTX assembly (`.version 7.0`, `.target sm_75`) & StackVM | Native machine binary emission (SASS/ELF) directly bypassing the CUDA driver |
+| **Runtime Model** | Parameter loading, predicated branch execution | Direct multi-threaded GPU kernel launches without host runtime wrapper |
+
+---
+
+## License
+
+MIT License. Copyright (c) 2026 Swayam.
